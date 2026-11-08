@@ -418,3 +418,4 @@ func escapeFTS5Query(q string) string {
 	escaped := strings.ReplaceAll(q, `"`, `""`)
 	return `"` + escaped + `"`
 }
+

@@ -10,6 +10,10 @@ Designed for accessing your local Antigravity agent (along with all your local M
 
 - **Real-Time SSE Streaming (`POST /api/v1/chat/stream`)**: Streams `init`, `step_update` (text deltas, thinking, tool calls), `result` (token usage, duration), and `done` events directly from `agy -p --output-format stream-json`.
 - **Single-Turn JSON Chat (`POST /api/v1/chat`)**: Sends a prompt (new or resumed conversation) and returns the complete structured response.
+- **Multimodal Attachments (`attachments`, `POST /api/v1/uploads`, `GET /api/v1/media`)**:
+  - Send images (`.jpg`, `.png`, `.webp`, `.gif`), PDFs, audio (`.wav`, `.mp3`, `.m4a`, `.opus`), or videos (`.mp4`, `.webm`) either as inline Base64 in `/api/v1/chat` & `/api/v1/chat/stream` or via `multipart/form-data` (`POST /api/v1/uploads`).
+  - Automatically grants `--add-dir` access to the uploaded files directory and injects `@/path/to/file` mentions into the prompt so `agy` reads them natively.
+  - Serve media files from conversation transcripts (`step.media[].uri`) or uploads via `GET /api/v1/media?uri=file:///...`.
 - **Model Quota & Limit Inspection (`GET /api/v1/usage`)**: Fetches real-time weekly and 5-hour quota buckets (`remaining_fraction`, `remaining_percent`, `reset_time`) per model family via `agy -p "/usage" --output-format json` with zero token cost.
 - **Models & MCP Discovery (`GET /api/v1/models`, `GET /api/v1/mcp`)**: Lists all available models, custom agents, and local MCP servers.
 - **Conversation History & FTS5 Search (`GET /api/v1/conversations`, `/search`, `/{id}`)**: Reads `~/.gemini/antigravity-cli/conversation_summaries.db` (read-only pure-Go SQLite) and full `transcript.jsonl` / `transcript_full.jsonl` logs.
@@ -94,14 +98,44 @@ curl -N -X POST http://localhost:8080/api/v1/chat/stream \
   }'
 ```
 
-### 7. Non-Streaming Chat
+### 7. Chat with Attachments (Inline Base64 or Multipart Upload)
+
+#### Option A: Inline Base64 in `POST /api/v1/chat` or `POST /api/v1/chat/stream`
 ```bash
+B64=$(base64 -i screenshot.jpg)
+curl -N -X POST http://localhost:8080/api/v1/chat/stream \
+  -H "Content-Type: application/json" \
+  -d "{
+    \"prompt\": \"What is shown in this screenshot?\",
+    \"attachments\": [
+      {
+        \"filename\": \"screenshot.jpg\",
+        \"mime_type\": \"image/jpeg\",
+        \"data_base64\": \"$B64\"
+      }
+    ]
+  }"
+```
+
+#### Option B: Multipart Upload (`POST /api/v1/uploads`) + `attachment_paths`
+```bash
+# 1. Upload one or more files
+curl -X POST http://localhost:8080/api/v1/uploads \
+  -F "file=@screenshot.jpg"
+# Returns: {"count":1,"files":[{"filename":"screenshot.jpg","path":"/Users/dika/.gemini/antigravity-cli/uploads/...","uri":"file:///...","mime_type":"image/jpeg","size":12345}]}
+
+# 2. Reference the returned path in chat
 curl -X POST http://localhost:8080/api/v1/chat \
   -H "Content-Type: application/json" \
   -d '{
-    "prompt": "Reply with PONG",
-    "permission_mode": "skip-permissions"
+    "prompt": "Analyze this screenshot",
+    "attachment_paths": ["/Users/dika/.gemini/antigravity-cli/uploads/..."]
   }'
+```
+
+#### Fetch Media / Transcript Images (`GET /api/v1/media`)
+```bash
+curl "http://localhost:8080/api/v1/media?uri=file:///Users/dika/.gemini/antigravity-cli/brain/<conv_id>/.system_generated/logs/media/step_2_media_0.jpg" --output image.jpg
 ```
 
 ### 8. Cancel Active Conversation Turn

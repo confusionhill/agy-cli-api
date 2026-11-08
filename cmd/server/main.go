@@ -64,3 +64,4 @@ func main() {
 	}
 	logger.Info("server stopped")
 }
+

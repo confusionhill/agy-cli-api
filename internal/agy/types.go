@@ -2,18 +2,38 @@ package agy
 
 import "encoding/json"
 
+// Attachment represents a file/image/audio/video attachment sent with a chat request.
+// Either DataBase64 (inline base64 or data URL) or Path (from POST /api/v1/uploads) may be provided.
+type Attachment struct {
+	Filename   string `json:"filename,omitempty"`
+	MimeType   string `json:"mime_type,omitempty"`
+	DataBase64 string `json:"data_base64,omitempty"`
+	Path       string `json:"path,omitempty"`
+}
+
+// UploadedFile represents metadata returned when saving an uploaded attachment.
+type UploadedFile struct {
+	Filename string `json:"filename"`
+	Path     string `json:"path"`
+	URI      string `json:"uri"`
+	MimeType string `json:"mime_type"`
+	Size     int64  `json:"size"`
+}
+
 // ChatRequest represents the parameters for running a turn on the agy CLI.
 type ChatRequest struct {
-	Prompt               string   `json:"prompt"`
-	ConversationID       string   `json:"conversation_id,omitempty"`
-	WorkspaceDir         string   `json:"workspace_dir,omitempty"`
-	AddDirs              []string `json:"add_dirs,omitempty"`
-	Model                string   `json:"model,omitempty"`
-	Effort               string   `json:"effort,omitempty"`
-	Agent                string   `json:"agent,omitempty"`
-	PermissionMode       string   `json:"permission_mode,omitempty"`
-	DisableSlashCommands bool     `json:"disable_slash_commands,omitempty"`
-	JSONSchema           string   `json:"json_schema,omitempty"`
+	Prompt               string       `json:"prompt"`
+	ConversationID       string       `json:"conversation_id,omitempty"`
+	WorkspaceDir         string       `json:"workspace_dir,omitempty"`
+	AddDirs              []string     `json:"add_dirs,omitempty"`
+	Model                string       `json:"model,omitempty"`
+	Effort               string       `json:"effort,omitempty"`
+	Agent                string       `json:"agent,omitempty"`
+	PermissionMode       string       `json:"permission_mode,omitempty"`
+	DisableSlashCommands bool         `json:"disable_slash_commands,omitempty"`
+	JSONSchema           string       `json:"json_schema,omitempty"`
+	Attachments          []Attachment `json:"attachments,omitempty"`
+	AttachmentPaths      []string     `json:"attachment_paths,omitempty"`
 }
 
 // TokenUsage represents token metrics returned by agy.

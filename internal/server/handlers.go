@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -28,6 +30,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		"agy_bin":                 s.cfg.AgyBin,
 		"default_workspace":       s.cfg.DefaultWorkspace,
 		"default_permission_mode": s.cfg.DefaultPermissionMode,
+		"uploads_dir":             s.runner.UploadsDir(),
 		"error":                   errMsg,
 		"timestamp":               time.Now().UTC().Format(time.RFC3339),
 	})
@@ -136,14 +139,98 @@ func (s *Server) handleCancelConversation(w http.ResponseWriter, r *http.Request
 	})
 }
 
+func (s *Server) handleUploads(w http.ResponseWriter, r *http.Request) {
+	// Allow up to 100 MiB multipart uploads
+	if err := r.ParseMultipartForm(100 << 20); err != nil {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid multipart form: %v", err))
+		return
+	}
+	if r.MultipartForm == nil || len(r.MultipartForm.File) == 0 {
+		writeError(w, http.StatusBadRequest, "no files provided in multipart form")
+		return
+	}
+
+	var uploaded []agy.UploadedFile
+	for _, fileHeaders := range r.MultipartForm.File {
+		for _, fh := range fileHeaders {
+			f, err := fh.Open()
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, fmt.Sprintf("open uploaded file: %v", err))
+				return
+			}
+			contentType := fh.Header.Get("Content-Type")
+			saved, saveErr := s.runner.SaveReaderAttachment(fh.Filename, contentType, f)
+			_ = f.Close()
+			if saveErr != nil {
+				writeError(w, http.StatusInternalServerError, fmt.Sprintf("save uploaded file: %v", saveErr))
+				return
+			}
+			uploaded = append(uploaded, *saved)
+		}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"files": uploaded,
+		"count": len(uploaded),
+	})
+}
+
+func (s *Server) handleMedia(w http.ResponseWriter, r *http.Request) {
+	rawTarget := strings.TrimSpace(r.URL.Query().Get("uri"))
+	if rawTarget == "" {
+		rawTarget = strings.TrimSpace(r.URL.Query().Get("path"))
+	}
+	rawTarget = strings.TrimPrefix(rawTarget, "file://")
+	if rawTarget == "" {
+		writeError(w, http.StatusBadRequest, "uri or path query parameter is required")
+		return
+	}
+
+	cleanTarget, err := filepath.Abs(rawTarget)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid file path")
+		return
+	}
+
+	// Security check: only allow serving files from DataDir (brain/ or uploads/) or UploadsDir
+	allowedDataDir, _ := filepath.Abs(s.cfg.DataDir)
+	allowedUploadsDir, _ := filepath.Abs(s.runner.UploadsDir())
+
+	inDataDir := allowedDataDir != "" && strings.HasPrefix(cleanTarget, allowedDataDir+string(filepath.Separator))
+	inUploadsDir := allowedUploadsDir != "" && strings.HasPrefix(cleanTarget, allowedUploadsDir+string(filepath.Separator))
+
+	if !inDataDir && !inUploadsDir {
+		writeError(w, http.StatusForbidden, "media path outside allowed data/uploads directories")
+		return
+	}
+
+	info, err := os.Stat(cleanTarget)
+	if err != nil || info.IsDir() {
+		writeError(w, http.StatusNotFound, "media file not found")
+		return
+	}
+
+	http.ServeFile(w, r, cleanTarget)
+}
+
+func hasPromptOrAttachment(req agy.ChatRequest) bool {
+	if strings.TrimSpace(req.Prompt) != "" {
+		return true
+	}
+	if len(req.Attachments) > 0 || len(req.AttachmentPaths) > 0 {
+		return true
+	}
+	return false
+}
+
 func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	var req agy.ChatRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON request body")
 		return
 	}
-	if strings.TrimSpace(req.Prompt) == "" {
-		writeError(w, http.StatusBadRequest, "prompt is required")
+	if !hasPromptOrAttachment(req) {
+		writeError(w, http.StatusBadRequest, "prompt or attachment is required")
 		return
 	}
 
@@ -162,8 +249,8 @@ func (s *Server) handleChatStream(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid JSON request body")
 		return
 	}
-	if strings.TrimSpace(req.Prompt) == "" {
-		writeError(w, http.StatusBadRequest, "prompt is required")
+	if !hasPromptOrAttachment(req) {
+		writeError(w, http.StatusBadRequest, "prompt or attachment is required")
 		return
 	}
 

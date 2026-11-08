@@ -3,6 +3,7 @@ package server
 import (
 	"bytes"
 	"encoding/json"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -91,8 +92,44 @@ func TestServerEndpointsAndSSE(t *testing.T) {
 		t.Errorf("unexpected usage response: %+v", usage)
 	}
 
-	// 4. Test POST /api/v1/chat/stream (SSE)
-	body := bytes.NewBufferString(`{"prompt":"hello"}`)
+	// 4. Test POST /api/v1/uploads & GET /api/v1/media
+	var mpBuf bytes.Buffer
+	mpWriter := multipart.NewWriter(&mpBuf)
+	fw, err := mpWriter.CreateFormFile("file", "screen.png")
+	if err != nil {
+		t.Fatalf("create form file: %v", err)
+	}
+	_, _ = fw.Write([]byte("\x89PNG\r\n\x1a\nfake-png-content"))
+	_ = mpWriter.Close()
+
+	reqUp := httptest.NewRequest(http.MethodPost, "/api/v1/uploads", &mpBuf)
+	reqUp.Header.Set("Content-Type", mpWriter.FormDataContentType())
+	recUp := httptest.NewRecorder()
+	handler.ServeHTTP(recUp, reqUp)
+	if recUp.Code != http.StatusOK {
+		t.Fatalf("expected 200 from /api/v1/uploads, got %d: %s", recUp.Code, recUp.Body.String())
+	}
+	var upResp struct {
+		Files []agy.UploadedFile `json:"files"`
+		Count int                `json:"count"`
+	}
+	if err := json.Unmarshal(recUp.Body.Bytes(), &upResp); err != nil || upResp.Count != 1 {
+		t.Fatalf("unexpected upload response: %+v (err=%v)", upResp, err)
+	}
+
+	// Fetch uploaded file via GET /api/v1/media
+	reqMedia := httptest.NewRequest(http.MethodGet, "/api/v1/media?uri="+upResp.Files[0].URI, nil)
+	recMedia := httptest.NewRecorder()
+	handler.ServeHTTP(recMedia, reqMedia)
+	if recMedia.Code != http.StatusOK {
+		t.Fatalf("expected 200 from /api/v1/media, got %d: %s", recMedia.Code, recMedia.Body.String())
+	}
+	if !strings.Contains(recMedia.Body.String(), "fake-png-content") {
+		t.Errorf("unexpected media body: %q", recMedia.Body.String())
+	}
+
+	// 5. Test POST /api/v1/chat/stream (SSE) with inline base64 attachment
+	body := bytes.NewBufferString(`{"prompt":"describe image","attachments":[{"filename":"shot.jpg","mime_type":"image/jpeg","data_base64":"ZmFrZQ=="}]}`)
 	reqStream := httptest.NewRequest(http.MethodPost, "/api/v1/chat/stream", body)
 	recStream := httptest.NewRecorder()
 	handler.ServeHTTP(recStream, reqStream)

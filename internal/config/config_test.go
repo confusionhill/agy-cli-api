@@ -35,3 +35,4 @@ func TestLoadDefaultsAndOverrides(t *testing.T) {
 		t.Errorf("unexpected CORSOrigins: %v", cfg.CORSOrigins)
 	}
 }
+

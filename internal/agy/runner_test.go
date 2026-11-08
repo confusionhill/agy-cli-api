@@ -1,7 +1,10 @@
 package agy
 
 import (
+	"encoding/base64"
+	"os"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -110,5 +113,42 @@ open-design            stdio  enabled  /Applications/Open Design.app/Contents/He
 	}
 	if servers[1].Name != "open-design" || servers[1].CommandURL != "/Applications/Open Design.app/Contents/Helper mcp" {
 		t.Errorf("unexpected server[1]: %+v", servers[1])
+	}
+}
+
+func TestPrepareChatRequestWithBase64Attachments(t *testing.T) {
+	r := NewRunner("agy", "/workspace", "skip-permissions")
+	uploadsDir := t.TempDir()
+	r.SetUploadsDir(uploadsDir)
+
+	sampleBytes := []byte("fake image payload")
+	b64 := base64.StdEncoding.EncodeToString(sampleBytes)
+
+	req := ChatRequest{
+		Prompt: "What is in this screenshot?",
+		Attachments: []Attachment{
+			{
+				Filename:   "aqw_screenshot.jpg",
+				MimeType:   "image/jpeg",
+				DataBase64: "data:image/jpeg;base64," + b64,
+			},
+		},
+	}
+
+	prepared, err := r.PrepareChatRequest(req)
+	if err != nil {
+		t.Fatalf("PrepareChatRequest failed: %v", err)
+	}
+
+	if !strings.Contains(prepared.Prompt, "Attached files:\n@"+uploadsDir) {
+		t.Errorf("expected prompt to contain @<path>, got:\n%s", prepared.Prompt)
+	}
+	if len(prepared.AddDirs) != 1 || prepared.AddDirs[0] != uploadsDir {
+		t.Errorf("expected AddDirs to include %s, got %v", uploadsDir, prepared.AddDirs)
+	}
+
+	entries, err := os.ReadDir(uploadsDir)
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("expected 1 saved file in uploadsDir, got %d (err=%v)", len(entries), err)
 	}
 }

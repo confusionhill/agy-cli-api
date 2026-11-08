@@ -122,3 +122,4 @@ func TestConversationStoreListSearchAndGet(t *testing.T) {
 		t.Errorf("expected full step content to be resolved, got %q", detail.Steps[1].Content)
 	}
 }
+

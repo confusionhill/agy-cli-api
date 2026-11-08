@@ -3,6 +3,7 @@ package server
 import (
 	"log/slog"
 	"net/http"
+	"path/filepath"
 
 	"github.com/dika/agy-cli-api/internal/agy"
 	"github.com/dika/agy-cli-api/internal/config"
@@ -21,6 +22,9 @@ type Server struct {
 func New(cfg *config.Config, runner *agy.Runner, convStore *store.ConversationStore, logger *slog.Logger) *Server {
 	if logger == nil {
 		logger = slog.Default()
+	}
+	if cfg != nil && cfg.DataDir != "" && runner != nil {
+		runner.SetUploadsDir(filepath.Join(cfg.DataDir, "uploads"))
 	}
 	return &Server{
 		cfg:    cfg,
@@ -43,6 +47,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/conversations/search", s.handleSearchConversations)
 	mux.HandleFunc("GET /api/v1/conversations/{id}", s.handleGetConversation)
 	mux.HandleFunc("POST /api/v1/conversations/{id}/cancel", s.handleCancelConversation)
+
+	mux.HandleFunc("POST /api/v1/uploads", s.handleUploads)
+	mux.HandleFunc("GET /api/v1/media", s.handleMedia)
 
 	mux.HandleFunc("POST /api/v1/chat", s.handleChat)
 	mux.HandleFunc("POST /api/v1/chat/stream", s.handleChatStream)

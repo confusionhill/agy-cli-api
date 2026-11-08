@@ -21,6 +21,7 @@ type Runner struct {
 	binPath               string
 	defaultWorkspace      string
 	defaultPermissionMode string
+	uploadsDir            string
 	activeCancels         sync.Map // map[string]context.CancelFunc keyed by conversation_id
 }
 
@@ -98,8 +99,14 @@ func (r *Runner) ResolveWorkspace(requested string) string {
 
 // StreamChat spawns `agy -p --output-format stream-json` and streams parsed events over a channel.
 func (r *Runner) StreamChat(ctx context.Context, req ChatRequest) (<-chan StreamEvent, error) {
+	prepared, err := r.PrepareChatRequest(req)
+	if err != nil {
+		return nil, fmt.Errorf("prepare attachments: %w", err)
+	}
+	req = prepared
+
 	if strings.TrimSpace(req.Prompt) == "" {
-		return nil, errors.New("prompt is required")
+		return nil, errors.New("prompt or attachment is required")
 	}
 
 	runCtx, cancel := context.WithCancel(ctx)
