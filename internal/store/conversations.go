@@ -79,33 +79,73 @@ type ListOptions struct {
 
 // ConversationStore reads conversation metadata and transcripts from the Antigravity data directory.
 type ConversationStore struct {
-	dataDir string
+	dataDir     string
+	desktopDir  string
+	hasAttached bool
 }
 
 // NewConversationStore creates a new ConversationStore rooted at dataDir (e.g. ~/.gemini/antigravity-cli).
-func NewConversationStore(dataDir string) *ConversationStore {
-	return &ConversationStore{dataDir: dataDir}
+func NewConversationStore(dataDir string, extraDesktopDir ...string) *ConversationStore {
+	var desktopDir string
+	if len(extraDesktopDir) > 0 {
+		desktopDir = extraDesktopDir[0]
+	} else {
+		homeDir, _ := os.UserHomeDir()
+		desktopDir = filepath.Join(homeDir, ".gemini", "antigravity")
+	}
+	return &ConversationStore{
+		dataDir:    dataDir,
+		desktopDir: desktopDir,
+	}
 }
 
-func (s *ConversationStore) openDB() (*sql.DB, error) {
+func (s *ConversationStore) openDB() (*sql.DB, bool, error) {
 	dbPath := filepath.Join(s.dataDir, "conversation_summaries.db")
-	if _, err := os.Stat(dbPath); err != nil {
-		return nil, fmt.Errorf("stat conversation_summaries.db: %w", err)
+	desktopPath := filepath.Join(s.desktopDir, "conversation_summaries.db")
+
+	var primaryPath string
+	hasDesktop := false
+
+	if _, err := os.Stat(dbPath); err == nil {
+		primaryPath = dbPath
+		if desktopPath != dbPath {
+			if _, dErr := os.Stat(desktopPath); dErr == nil {
+				hasDesktop = true
+			}
+		}
+	} else if _, dErr := os.Stat(desktopPath); dErr == nil {
+		primaryPath = desktopPath
+	} else {
+		return nil, false, fmt.Errorf("stat conversation_summaries.db: %w", err)
 	}
-	dsn := fmt.Sprintf("file:%s?mode=ro&_pragma=busy_timeout(5000)", filepath.ToSlash(dbPath))
-	return sql.Open("sqlite", dsn)
+
+	dsn := fmt.Sprintf("file:%s?mode=ro&_pragma=busy_timeout(5000)", filepath.ToSlash(primaryPath))
+	db, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		return nil, false, err
+	}
+
+	attached := false
+	if hasDesktop && primaryPath == dbPath {
+		attachSQL := fmt.Sprintf("ATTACH DATABASE '%s' AS desktop;", filepath.ToSlash(desktopPath))
+		if _, aErr := db.Exec(attachSQL); aErr == nil {
+			attached = true
+		}
+	}
+
+	return db, attached, nil
 }
 
 // List returns a paginated list of ConversationSummary items ordered by last_modified_time DESC.
 func (s *ConversationStore) List(ctx context.Context, opts ListOptions) ([]ConversationSummary, error) {
-	if opts.Limit <= 0 || opts.Limit > 200 {
-		opts.Limit = 50
+	if opts.Limit <= 0 || opts.Limit > 300 {
+		opts.Limit = 100
 	}
 	if opts.Offset < 0 {
 		opts.Offset = 0
 	}
 
-	db, err := s.openDB()
+	db, attached, err := s.openDB()
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return []ConversationSummary{}, nil
@@ -114,24 +154,50 @@ func (s *ConversationStore) List(ctx context.Context, opts ListOptions) ([]Conve
 	}
 	defer db.Close()
 
-	query := `
-		SELECT
-			conversation_id,
-			title,
-			preview,
-			step_count,
-			CAST(last_modified_time AS TEXT),
-			workspace_uris,
-			status,
-			source,
-			project_id,
-			agent_name,
-			parent_conversation_id,
-			CAST(last_user_input_time AS TEXT)
-		FROM conversation_summaries
-		WHERE 1=1
-	`
+	var query string
 	var args []any
+
+	if attached {
+		query = `
+			SELECT
+				conversation_id,
+				title,
+				preview,
+				step_count,
+				CAST(last_modified_time AS TEXT),
+				workspace_uris,
+				status,
+				source,
+				project_id,
+				agent_name,
+				parent_conversation_id,
+				CAST(last_user_input_time AS TEXT)
+			FROM (
+				SELECT conversation_id, title, preview, step_count, last_modified_time, workspace_uris, status, source, project_id, agent_name, parent_conversation_id, last_user_input_time FROM conversation_summaries
+				UNION
+				SELECT conversation_id, title, preview, step_count, last_modified_time, workspace_uris, status, source, project_id, agent_name, parent_conversation_id, last_user_input_time FROM desktop.conversation_summaries
+			)
+			WHERE 1=1
+		`
+	} else {
+		query = `
+			SELECT
+				conversation_id,
+				title,
+				preview,
+				step_count,
+				CAST(last_modified_time AS TEXT),
+				workspace_uris,
+				status,
+				source,
+				project_id,
+				agent_name,
+				parent_conversation_id,
+				CAST(last_user_input_time AS TEXT)
+			FROM conversation_summaries
+			WHERE 1=1
+		`
+	}
 
 	if strings.TrimSpace(opts.Workspace) != "" {
 		query += ` AND workspace_uris LIKE ?`
@@ -188,7 +254,7 @@ func (s *ConversationStore) Search(ctx context.Context, q string, limit int) ([]
 		limit = 25
 	}
 
-	db, err := s.openDB()
+	db, attached, err := s.openDB()
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return []SearchHit{}, nil
@@ -238,22 +304,45 @@ func (s *ConversationStore) Search(ctx context.Context, q string, limit int) ([]
 		}
 	}
 
-	// Fallback to LIKE on conversation_summaries if FTS5 returns an error
+	// Fallback to LIKE
 	likePattern := "%" + q + "%"
-	fallbackQuery := `
-		SELECT
-			conversation_id,
-			title,
-			workspace_uris,
-			project_id,
-			preview,
-			step_count,
-			CAST(last_modified_time AS TEXT)
-		FROM conversation_summaries
-		WHERE title LIKE ? OR preview LIKE ? OR workspace_uris LIKE ?
-		ORDER BY last_modified_time DESC
-		LIMIT ?
-	`
+	var fallbackQuery string
+	if attached {
+		fallbackQuery = `
+			SELECT
+				conversation_id,
+				title,
+				workspace_uris,
+				project_id,
+				preview,
+				step_count,
+				CAST(last_modified_time AS TEXT)
+			FROM (
+				SELECT conversation_id, title, preview, step_count, last_modified_time, workspace_uris, project_id FROM conversation_summaries
+				UNION
+				SELECT conversation_id, title, preview, step_count, last_modified_time, workspace_uris, project_id FROM desktop.conversation_summaries
+			)
+			WHERE title LIKE ? OR preview LIKE ? OR workspace_uris LIKE ?
+			ORDER BY last_modified_time DESC
+			LIMIT ?
+		`
+	} else {
+		fallbackQuery = `
+			SELECT
+				conversation_id,
+				title,
+				workspace_uris,
+				project_id,
+				preview,
+				step_count,
+				CAST(last_modified_time AS TEXT)
+			FROM conversation_summaries
+			WHERE title LIKE ? OR preview LIKE ? OR workspace_uris LIKE ?
+			ORDER BY last_modified_time DESC
+			LIMIT ?
+		`
+	}
+
 	fbRows, fbErr := db.QueryContext(ctx, fallbackQuery, likePattern, likePattern, likePattern, limit)
 	if fbErr != nil {
 		return nil, fmt.Errorf("search conversations: %w", fbErr)
@@ -287,25 +376,55 @@ func (s *ConversationStore) Get(ctx context.Context, conversationID string) (*Co
 	}
 
 	var summary *ConversationSummary
-	if db, err := s.openDB(); err == nil {
+	if db, attached, err := s.openDB(); err == nil {
 		defer db.Close()
-		row := db.QueryRowContext(ctx, `
-			SELECT
-				conversation_id,
-				title,
-				preview,
-				step_count,
-				CAST(last_modified_time AS TEXT),
-				workspace_uris,
-				status,
-				source,
-				project_id,
-				agent_name,
-				parent_conversation_id,
-				CAST(last_user_input_time AS TEXT)
-			FROM conversation_summaries
-			WHERE conversation_id = ?
-		`, conversationID)
+
+		var getQuery string
+		if attached {
+			getQuery = `
+				SELECT
+					conversation_id,
+					title,
+					preview,
+					step_count,
+					CAST(last_modified_time AS TEXT),
+					workspace_uris,
+					status,
+					source,
+					project_id,
+					agent_name,
+					parent_conversation_id,
+					CAST(last_user_input_time AS TEXT)
+				FROM (
+					SELECT conversation_id, title, preview, step_count, last_modified_time, workspace_uris, status, source, project_id, agent_name, parent_conversation_id, last_user_input_time FROM conversation_summaries
+					UNION
+					SELECT conversation_id, title, preview, step_count, last_modified_time, workspace_uris, status, source, project_id, agent_name, parent_conversation_id, last_user_input_time FROM desktop.conversation_summaries
+				)
+				WHERE conversation_id = ?
+				LIMIT 1
+			`
+		} else {
+			getQuery = `
+				SELECT
+					conversation_id,
+					title,
+					preview,
+					step_count,
+					CAST(last_modified_time AS TEXT),
+					workspace_uris,
+					status,
+					source,
+					project_id,
+					agent_name,
+					parent_conversation_id,
+					CAST(last_user_input_time AS TEXT)
+				FROM conversation_summaries
+				WHERE conversation_id = ?
+				LIMIT 1
+			`
+		}
+
+		row := db.QueryRowContext(ctx, getQuery, conversationID)
 
 		var item ConversationSummary
 		var wsRaw string
@@ -343,11 +462,26 @@ func (s *ConversationStore) Get(ctx context.Context, conversationID string) (*Co
 	}, nil
 }
 
-// ReadTranscript reads transcript.jsonl (and resolves truncated lines from transcript_full.jsonl if present).
+// ReadTranscript reads transcript.jsonl from dataDir or desktopDir.
 func (s *ConversationStore) ReadTranscript(conversationID string) ([]TranscriptStep, error) {
-	logsDir := filepath.Join(s.dataDir, "brain", conversationID, ".system_generated", "logs")
-	compactPath := filepath.Join(logsDir, "transcript.jsonl")
-	fullPath := filepath.Join(logsDir, "transcript_full.jsonl")
+	candidateDirs := []string{
+		filepath.Join(s.dataDir, "brain", conversationID, ".system_generated", "logs"),
+		filepath.Join(s.desktopDir, "brain", conversationID, ".system_generated", "logs"),
+	}
+
+	var compactPath, fullPath string
+	for _, dir := range candidateDirs {
+		p := filepath.Join(dir, "transcript.jsonl")
+		if _, err := os.Stat(p); err == nil {
+			compactPath = p
+			fullPath = filepath.Join(dir, "transcript_full.jsonl")
+			break
+		}
+	}
+
+	if compactPath == "" {
+		return nil, os.ErrNotExist
+	}
 
 	f, err := os.Open(compactPath)
 	if err != nil {
@@ -356,7 +490,7 @@ func (s *ConversationStore) ReadTranscript(conversationID string) ([]TranscriptS
 	defer f.Close()
 
 	var steps []TranscriptStep
-	needsFull := make(map[int]int) // lineNumber -> index in steps
+	needsFull := make(map[int]int)
 
 	scanner := bufio.NewScanner(f)
 	scanner.Buffer(make([]byte, 64*1024), 20*1024*1024)
@@ -418,4 +552,3 @@ func escapeFTS5Query(q string) string {
 	escaped := strings.ReplaceAll(q, `"`, `""`)
 	return `"` + escaped + `"`
 }
-

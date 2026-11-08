@@ -70,7 +70,7 @@ func setupTestStore(t *testing.T) *ConversationStore {
 		t.Fatalf("write transcript_full.jsonl: %v", err)
 	}
 
-	return NewConversationStore(tmpDir)
+	return NewConversationStore(tmpDir, "")
 }
 
 func TestConversationStoreListSearchAndGet(t *testing.T) {
