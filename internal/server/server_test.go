@@ -143,4 +143,57 @@ func TestServerEndpointsAndSSE(t *testing.T) {
 		!strings.Contains(sseOut, "event: done") {
 		t.Errorf("unexpected SSE stream output:\n%s", sseOut)
 	}
+
+	// 6. Test GET /v1/models (OpenAI compatibility)
+	reqOAIModels := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	recOAIModels := httptest.NewRecorder()
+	handler.ServeHTTP(recOAIModels, reqOAIModels)
+	if recOAIModels.Code != http.StatusOK {
+		t.Fatalf("expected 200 from /v1/models, got %d: %s", recOAIModels.Code, recOAIModels.Body.String())
+	}
+	var oaiModels struct {
+		Object string `json:"object"`
+		Data   []struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(recOAIModels.Body.Bytes(), &oaiModels); err != nil || oaiModels.Object != "list" || len(oaiModels.Data) == 0 {
+		t.Fatalf("unexpected /v1/models response: %+v (err=%v)", oaiModels, err)
+	}
+
+	// 7. Test POST /v1/chat/completions (OpenAI non-streaming)
+	oaiJSON := `{"model":"gemini-4-argon-medium","messages":[{"role":"user","content":"Hello from test"}],"stream":false}`
+	reqOAIChat := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewBufferString(oaiJSON))
+	recOAIChat := httptest.NewRecorder()
+	handler.ServeHTTP(recOAIChat, reqOAIChat)
+	if recOAIChat.Code != http.StatusOK {
+		t.Fatalf("expected 200 from /v1/chat/completions, got %d: %s", recOAIChat.Code, recOAIChat.Body.String())
+	}
+	var oaiResp struct {
+		Object  string `json:"object"`
+		Choices []struct {
+			Message struct {
+				Content string `json:"content"`
+			} `json:"message"`
+		} `json:"choices"`
+	}
+	if err := json.Unmarshal(recOAIChat.Body.Bytes(), &oaiResp); err != nil || oaiResp.Object != "chat.completion" {
+		t.Fatalf("unexpected /v1/chat/completions response: %+v (err=%v)", oaiResp, err)
+	}
+	if !strings.Contains(oaiResp.Choices[0].Message.Content, "Hello from fake agy!") {
+		t.Errorf("unexpected completion content: %q", oaiResp.Choices[0].Message.Content)
+	}
+
+	// 8. Test POST /v1/chat/completions (OpenAI streaming SSE)
+	oaiStreamJSON := `{"model":"gemini-4-argon-medium","messages":[{"role":"user","content":"Stream this"}],"stream":true}`
+	reqOAIStream := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewBufferString(oaiStreamJSON))
+	recOAIStream := httptest.NewRecorder()
+	handler.ServeHTTP(recOAIStream, reqOAIStream)
+	if recOAIStream.Code != http.StatusOK {
+		t.Fatalf("expected 200 from streaming /v1/chat/completions, got %d", recOAIStream.Code)
+	}
+	oaiStreamOut := recOAIStream.Body.String()
+	if !strings.Contains(oaiStreamOut, "chat.completion.chunk") || !strings.Contains(oaiStreamOut, "data: [DONE]") {
+		t.Errorf("unexpected OpenAI SSE output:\n%s", oaiStreamOut)
+	}
 }

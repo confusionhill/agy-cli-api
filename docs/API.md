@@ -25,6 +25,10 @@
 5. [Multimodal Attachments & Media](#5-multimodal-attachments--media)
    - [`POST /api/v1/uploads`](#post-apiv1uploads)
    - [`GET /api/v1/media`](#get-apiv1media)
+6. [OpenAI Compatibility Endpoints (/v1/...)](#6-openai-compatibility-endpoints-v1)
+   - [`POST /v1/chat/completions`](#post-v1chatcompletions)
+   - [`GET /v1/models`](#get-v1models)
+   - [`GET /v1/models/{id}`](#get-v1modelsid)
 
 ---
 
@@ -490,4 +494,77 @@ Serves a media file stored inside `~/.gemini/antigravity-cli/brain/` (such as `s
 
 #### Response `200 OK`
 Returns the raw binary file with its detected `Content-Type` (`image/jpeg`, `image/png`, `application/pdf`, `audio/mpeg`, etc.).
+
+---
+
+## 6. OpenAI Compatibility Endpoints (`/v1/...`)
+
+`agy-cli-api` exposes a standard OpenAI-compatible API so third-party tools (Cursor, Continue.dev, Cline, Aider, LiteLLM, LangChain, or official `openai` SDKs) can use your local Antigravity CLI as an LLM provider.
+
+### Configuration
+- **Base URL:** `http://localhost:8080/v1`
+- **API Key:** `not-needed` (any dummy string)
+
+---
+
+### `POST /v1/chat/completions`
+
+Creates a model response for the given chat conversation. Supports both single-turn JSON and real-time Server-Sent Events (`stream: true`).
+
+#### Request Parameters
+| Parameter | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| `model` | `string` | Yes | Model ID (e.g. `gemini-4-argon-low`, `gemini-4-argon-medium`, `gemini-3.8-flash-low`, `claude-opus-5-5-medium`, etc.) |
+| `messages` | `array` | Yes | List of message objects (`{"role": "system"|"user"|"assistant", "content": "..."}`) |
+| `stream` | `boolean` | No | If `true`, returns standard OpenAI SSE chunks (`chat.completion.chunk`) ending with `data: [DONE]` |
+| `conversation_id` | `string` | No | Optional Antigravity conversation ID to resume (also accepted via `X-Conversation-Id` header) |
+| `workspace_dir` | `string` | No | Optional host path to run the prompt inside |
+| `effort` | `string` | No | Reasoning effort: `low`, `medium`, `high`, `xhigh`, `max` |
+
+#### Non-Streaming Example:
+```bash
+curl -X POST http://localhost:8080/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "gemini-4-argon-low",
+    "messages": [
+      {"role": "user", "content": "Hello!"}
+    ],
+    "stream": false
+  }'
+```
+
+#### Streaming Example:
+```bash
+curl -N -X POST http://localhost:8080/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "gemini-4-argon-low",
+    "messages": [
+      {"role": "user", "content": "Count from 1 to 5"}
+    ],
+    "stream": true
+  }'
+```
+
+---
+
+### `GET /v1/models`
+
+Lists all available models discovered dynamically from `agy models`.
+
+```bash
+curl http://localhost:8080/v1/models
+```
+
+---
+
+### `GET /v1/models/{id}`
+
+Retrieves metadata for a specific model.
+
+```bash
+curl http://localhost:8080/v1/models/gemini-4-argon-medium
+```
+
 

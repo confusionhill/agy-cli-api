@@ -7,6 +7,7 @@ import (
 
 	"github.com/dika/agy-cli-api/internal/agy"
 	"github.com/dika/agy-cli-api/internal/config"
+	"github.com/dika/agy-cli-api/internal/openai"
 	"github.com/dika/agy-cli-api/internal/store"
 )
 
@@ -53,6 +54,12 @@ func (s *Server) Handler() http.Handler {
 
 	mux.HandleFunc("POST /api/v1/chat", s.handleChat)
 	mux.HandleFunc("POST /api/v1/chat/stream", s.handleChatStream)
+
+	// OpenAI Compatibility Endpoints (/v1/...)
+	openaiHandler := openai.NewHandler(s.runner)
+	mux.HandleFunc("POST /v1/chat/completions", openaiHandler.HandleChatCompletions)
+	mux.HandleFunc("GET /v1/models", openaiHandler.HandleListModels)
+	mux.HandleFunc("GET /v1/models/{id}", openaiHandler.HandleGetModel)
 
 	var handler http.Handler = mux
 	handler = LoggingMiddleware(s.logger)(handler)

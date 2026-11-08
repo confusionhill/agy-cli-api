@@ -145,6 +145,53 @@ curl -X POST "http://localhost:8080/api/v1/conversations/<conversation_id>/cance
 
 ---
 
+## OpenAI-Compatible API (`/v1/...`)
+
+`agy-cli-api` includes a drop-in **OpenAI-compatible API** under `/v1` for external harnesses (Cursor, Continue.dev, Cline, Aider, LiteLLM, LangChain, or python `openai`):
+
+- **Base URL:** `http://localhost:8080/v1`
+- **API Key:** `not-needed` (any string)
+
+### Example: Using with Python OpenAI SDK
+```python
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:8080/v1",
+    api_key="dummy",
+)
+
+# Streaming
+stream = client.chat.completions.create(
+    model="gemini-4-argon-low",
+    messages=[{"role": "user", "content": "Write a python script to ping a website"}],
+    stream=True,
+)
+for chunk in stream:
+    if chunk.choices[0].delta.content:
+        print(chunk.choices[0].delta.content, end="", flush=True)
+```
+
+### Example: Streaming with `curl`
+```bash
+curl -N -X POST http://localhost:8080/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "gemini-4-argon-low",
+    "messages": [
+      {"role": "user", "content": "Count from 1 to 5"}
+    ],
+    "stream": true
+  }'
+```
+
+### Example: List Models
+```bash
+curl http://localhost:8080/v1/models
+```
+
+---
+
 ## Telegram Bot Integration
 
 `agy-cli-api` includes an embedded Telegram Bot that runs concurrently with the HTTP API:
