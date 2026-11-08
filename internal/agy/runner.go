@@ -442,3 +442,4 @@ func (r *Runner) CheckBinary(ctx context.Context) error {
 	cmd := exec.CommandContext(ctx, r.binPath, "--help")
 	return cmd.Run()
 }
+

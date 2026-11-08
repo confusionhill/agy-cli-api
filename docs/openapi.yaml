@@ -1,0 +1,547 @@
+openapi: 3.1.0
+info:
+  title: agy-cli-api
+  version: 1.0.0
+  description: |
+    REST and Server-Sent Events (SSE) API wrapper around the local Google Antigravity (`agy`) CLI.
+    Provides remote access to conversations, real-time agent streaming, MCP servers, model quota limits, and multimodal file attachments.
+servers:
+  - url: http://localhost:8080
+    description: Local / VPN / Tunnel Server
+
+paths:
+  /healthz:
+    get:
+      summary: Health check and agy binary check
+      operationId: getHealth
+      responses:
+        "200":
+          description: Server health status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+                  agy_bin:
+                    type: string
+                  default_workspace:
+                    type: string
+                  default_permission_mode:
+                    type: string
+                  uploads_dir:
+                    type: string
+                  error:
+                    type: string
+                  timestamp:
+                    type: string
+                    format: date-time
+
+  /api/v1/models:
+    get:
+      summary: List available models and custom agents
+      operationId: listModels
+      responses:
+        "200":
+          description: Available models and agents
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  models:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/ModelInfo"
+                  agents:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/AgentInfo"
+
+  /api/v1/usage:
+    get:
+      summary: Get real-time model quota limits (/usage)
+      operationId: getUsage
+      responses:
+        "200":
+          description: Quota groups and remaining fraction/percentage buckets
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UsageData"
+
+  /api/v1/mcp:
+    get:
+      summary: List configured MCP servers
+      operationId: listMCP
+      responses:
+        "200":
+          description: Configured MCP servers
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  mcp_servers:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/MCPServerInfo"
+
+  /api/v1/conversations:
+    get:
+      summary: List conversations from conversation_summaries.db
+      operationId: listConversations
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+        - name: workspace
+          in: query
+          schema:
+            type: string
+        - name: status
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Paginated conversation summaries
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  count:
+                    type: integer
+                  conversations:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/ConversationSummary"
+
+  /api/v1/conversations/search:
+    get:
+      summary: Full-text search across conversations (FTS5)
+      operationId: searchConversations
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 25
+      responses:
+        "200":
+          description: Search hits
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  query:
+                    type: string
+                  count:
+                    type: integer
+                  results:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/SearchHit"
+
+  /api/v1/conversations/{id}:
+    get:
+      summary: Get conversation summary and full transcript steps
+      operationId: getConversation
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Conversation summary and transcript steps
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConversationDetail"
+        "404":
+          description: Conversation not found
+
+  /api/v1/conversations/{id}/cancel:
+    post:
+      summary: Cancel an actively running CLI turn for a conversation
+      operationId: cancelConversation
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Cancellation result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  conversation_id:
+                    type: string
+                  cancelled:
+                    type: boolean
+
+  /api/v1/chat:
+    post:
+      summary: Run a single chat turn and return the complete JSON result
+      operationId: runChat
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChatRequest"
+      responses:
+        "200":
+          description: Turn result payload
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResultPayload"
+
+  /api/v1/chat/stream:
+    post:
+      summary: Run a chat turn and stream real-time SSE events (init, step_update, result, error, done)
+      operationId: streamChat
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChatRequest"
+      responses:
+        "200":
+          description: Server-Sent Events stream (text/event-stream)
+          content:
+            text/event-stream:
+              schema:
+                type: string
+
+  /api/v1/uploads:
+    post:
+      summary: Upload one or more attachment files (multipart/form-data)
+      operationId: uploadFiles
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+      responses:
+        "200":
+          description: Uploaded file metadata
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  count:
+                    type: integer
+                  files:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/UploadedFile"
+
+  /api/v1/media:
+    get:
+      summary: Serve a media file from brain/ transcripts or uploads/
+      operationId: getMedia
+      parameters:
+        - name: uri
+          in: query
+          schema:
+            type: string
+          description: file:// URI from transcript step media or upload response
+        - name: path
+          in: query
+          schema:
+            type: string
+          description: Absolute path inside data/uploads directory
+      responses:
+        "200":
+          description: Binary media content
+
+components:
+  schemas:
+    ChatRequest:
+      type: object
+      properties:
+        prompt:
+          type: string
+        conversation_id:
+          type: string
+        workspace_dir:
+          type: string
+        add_dirs:
+          type: array
+          items:
+            type: string
+        model:
+          type: string
+          example: gemini-4-argon-medium
+        effort:
+          type: string
+          enum: [low, medium, high, xhigh, max]
+        agent:
+          type: string
+        permission_mode:
+          type: string
+          enum: [skip-permissions, auto, accept-edits, plan]
+          default: skip-permissions
+        disable_slash_commands:
+          type: boolean
+        json_schema:
+          type: string
+        attachments:
+          type: array
+          items:
+            $ref: "#/components/schemas/Attachment"
+        attachment_paths:
+          type: array
+          items:
+            type: string
+
+    Attachment:
+      type: object
+      properties:
+        filename:
+          type: string
+        mime_type:
+          type: string
+        data_base64:
+          type: string
+          description: Base64-encoded payload or data:<mime>;base64,... URL
+        path:
+          type: string
+          description: Local path returned from POST /api/v1/uploads
+
+    UploadedFile:
+      type: object
+      properties:
+        filename:
+          type: string
+        path:
+          type: string
+        uri:
+          type: string
+        mime_type:
+          type: string
+        size:
+          type: integer
+
+    TokenUsage:
+      type: object
+      properties:
+        input_tokens:
+          type: integer
+        output_tokens:
+          type: integer
+        thinking_tokens:
+          type: integer
+        cache_read_tokens:
+          type: integer
+        total_tokens:
+          type: integer
+
+    ResultPayload:
+      type: object
+      properties:
+        conversation_id:
+          type: string
+        status:
+          type: string
+        response:
+          type: string
+        duration_seconds:
+          type: number
+        num_turns:
+          type: integer
+        usage:
+          $ref: "#/components/schemas/TokenUsage"
+
+    ModelInfo:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+
+    AgentInfo:
+      type: object
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+
+    MCPServerInfo:
+      type: object
+      properties:
+        name:
+          type: string
+        type:
+          type: string
+        status:
+          type: string
+        command_or_url:
+          type: string
+
+    UsageData:
+      type: object
+      properties:
+        description:
+          type: string
+        groups:
+          type: array
+          items:
+            $ref: "#/components/schemas/UsageGroup"
+
+    UsageGroup:
+      type: object
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        buckets:
+          type: array
+          items:
+            $ref: "#/components/schemas/UsageBucket"
+
+    UsageBucket:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        window:
+          type: string
+        remaining_fraction:
+          type: number
+        remaining_percent:
+          type: number
+        reset_time:
+          type: string
+          format: date-time
+
+    ConversationSummary:
+      type: object
+      properties:
+        conversation_id:
+          type: string
+        title:
+          type: string
+        preview:
+          type: string
+        step_count:
+          type: integer
+        last_modified_time:
+          type: string
+        workspace_uris:
+          type: array
+          items:
+            type: string
+        status:
+          type: string
+        source:
+          type: string
+        project_id:
+          type: string
+        agent_name:
+          type: string
+        parent_conversation_id:
+          type: string
+        last_user_input_time:
+          type: string
+
+    SearchHit:
+      type: object
+      properties:
+        conversation_id:
+          type: string
+        title:
+          type: string
+        workspace:
+          type: string
+        project:
+          type: string
+        user_snippet:
+          type: string
+        agent_snippet:
+          type: string
+        step_count:
+          type: integer
+        last_modified_time:
+          type: string
+
+    TranscriptStep:
+      type: object
+      properties:
+        step_index:
+          type: integer
+        source:
+          type: string
+        type:
+          type: string
+        status:
+          type: string
+        created_at:
+          type: string
+        content:
+          type: string
+        thinking:
+          type: string
+        tool_calls:
+          type: array
+          items:
+            type: object
+        media:
+          type: array
+          items:
+            type: object
+        input_tokens:
+          type: integer
+        output_tokens:
+          type: integer
+        cache_read_tokens:
+          type: integer
+
+    ConversationDetail:
+      type: object
+      properties:
+        summary:
+          $ref: "#/components/schemas/ConversationSummary"
+        steps:
+          type: array
+          items:
+            $ref: "#/components/schemas/TranscriptStep"
+
