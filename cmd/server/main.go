@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/dika/agy-cli-api/internal/agy"
+	"github.com/dika/agy-cli-api/internal/bot"
 	"github.com/dika/agy-cli-api/internal/config"
 	"github.com/dika/agy-cli-api/internal/server"
 	"github.com/dika/agy-cli-api/internal/store"
@@ -38,6 +39,25 @@ func main() {
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
+	// Start Telegram Bot if enabled and token provided
+	botCtx, botCancel := context.WithCancel(context.Background())
+	defer botCancel()
+
+	if cfg.TelegramEnabled && cfg.TelegramBotToken != "" {
+		tgBot, err := bot.New(cfg, runner, convStore, logger)
+		if err != nil {
+			logger.Warn("failed to initialize telegram bot (skipping)", "error", err)
+		} else {
+			go func() {
+				if bErr := tgBot.Start(botCtx); bErr != nil {
+					logger.Warn("telegram bot terminated", "error", bErr)
+				}
+			}()
+		}
+	} else {
+		logger.Info("telegram bot disabled (TELEGRAM_ENABLED=false or TELEGRAM_BOT_TOKEN not provided)")
+	}
+
 	go func() {
 		logger.Info("starting agy-cli-api server",
 			"addr", httpServer.Addr,
@@ -45,6 +65,7 @@ func main() {
 			"data_dir", cfg.DataDir,
 			"default_workspace", cfg.DefaultWorkspace,
 			"default_permission_mode", cfg.DefaultPermissionMode,
+			"telegram_enabled", cfg.TelegramEnabled,
 		)
 		if err := httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			logger.Error("http server error", "error", err)
@@ -56,7 +77,9 @@ func main() {
 	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
 	<-stop
 
-	logger.Info("shutting down agy-cli-api server...")
+	logger.Info("shutting down agy-cli-api server and telegram bot...")
+	botCancel()
+
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 

@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -16,6 +17,9 @@ type Config struct {
 	DefaultWorkspace      string
 	DefaultPermissionMode string
 	CORSOrigins           []string
+	TelegramEnabled       bool
+	TelegramBotToken      string
+	TelegramAllowedUsers  []int64
 }
 
 // Load reads configuration from optional .env file and environment variables.
@@ -50,6 +54,20 @@ func Load() (*Config, error) {
 		corsOrigins = []string{"*"}
 	}
 
+	tgToken := strings.TrimSpace(getEnv("TELEGRAM_BOT_TOKEN", ""))
+	tgEnabledRaw := strings.ToLower(strings.TrimSpace(getEnv("TELEGRAM_ENABLED", "false")))
+	tgEnabled := (tgEnabledRaw == "true" || tgEnabledRaw == "1" || tgEnabledRaw == "yes") && tgToken != ""
+
+	var tgAllowedUsers []int64
+	for _, idStr := range strings.Split(getEnv("TELEGRAM_ALLOWED_USER_IDS", ""), ",") {
+		trimmed := strings.TrimSpace(idStr)
+		if trimmed != "" {
+			if id, err := strconv.ParseInt(trimmed, 10, 64); err == nil {
+				tgAllowedUsers = append(tgAllowedUsers, id)
+			}
+		}
+	}
+
 	return &Config{
 		Port:                  port,
 		AgyBin:                agyBin,
@@ -57,6 +75,9 @@ func Load() (*Config, error) {
 		DefaultWorkspace:      defaultWorkspace,
 		DefaultPermissionMode: defaultPermissionMode,
 		CORSOrigins:           corsOrigins,
+		TelegramEnabled:       tgEnabled,
+		TelegramBotToken:      tgToken,
+		TelegramAllowedUsers:  tgAllowedUsers,
 	}, nil
 }
 

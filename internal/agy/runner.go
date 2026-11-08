@@ -245,6 +245,9 @@ func (r *Runner) RunChat(ctx context.Context, req ChatRequest) (*ResultPayload, 
 		if finalResult.ConversationID == "" {
 			finalResult.ConversationID = lastConvID
 		}
+		if len(finalResult.Media) == 0 {
+			finalResult.Media = ExtractMediaFromText(finalResult.Response)
+		}
 		return finalResult, nil
 	}
 

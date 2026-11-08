@@ -54,6 +54,7 @@ type ResultPayload struct {
 	NumTurns        int             `json:"num_turns"`
 	Usage           TokenUsage      `json:"usage"`
 	Command         *CommandPayload `json:"command,omitempty"`
+	Media           []MediaItem     `json:"media,omitempty"`
 }
 
 // CommandPayload holds structured output from slash commands like /usage or /help.
@@ -71,6 +72,27 @@ type StreamEvent struct {
 	Result         *ResultPayload  `json:"result,omitempty"`
 	Error          string          `json:"error,omitempty"`
 	Raw            json.RawMessage `json:"-"`
+}
+
+// StepUpdatePayload represents the decoded payload of a step_update event.
+type StepUpdatePayload struct {
+	ConversationID string `json:"conversation_id"`
+	StepIndex      int    `json:"step_index"`
+	State          string `json:"state"`
+	StepType       string `json:"step_type"`
+	TextDelta      string `json:"text_delta"`
+}
+
+// StepUpdatePayload parses and returns the StepUpdate field.
+func (e StreamEvent) StepUpdatePayload() *StepUpdatePayload {
+	if len(e.StepUpdate) == 0 {
+		return nil
+	}
+	var su StepUpdatePayload
+	if err := json.Unmarshal(e.StepUpdate, &su); err == nil {
+		return &su
+	}
+	return nil
 }
 
 // UsageData represents the structured model quota response from `agy -p "/usage" --output-format json`.
