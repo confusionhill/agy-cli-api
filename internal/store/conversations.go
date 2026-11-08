@@ -71,10 +71,11 @@ type ConversationDetail struct {
 
 // ListOptions defines filtering and pagination options for listing conversations.
 type ListOptions struct {
-	Limit     int
-	Offset    int
-	Workspace string
-	Status    string
+	Limit           int
+	Offset          int
+	Workspace       string
+	Status          string
+	IncludeChildren bool
 }
 
 // ConversationStore reads conversation metadata and transcripts from the Antigravity data directory.
@@ -213,6 +214,9 @@ func (s *ConversationStore) List(ctx context.Context, opts ListOptions) ([]Conve
 		query += ` AND status = ?`
 		args = append(args, strings.TrimSpace(opts.Status))
 	}
+	if !opts.IncludeChildren {
+		query += ` AND (parent_conversation_id = '' OR parent_conversation_id IS NULL)`
+	}
 
 	query += ` ORDER BY last_modified_time DESC LIMIT ? OFFSET ?`
 	args = append(args, opts.Limit, opts.Offset)
@@ -327,11 +331,12 @@ func (s *ConversationStore) Search(ctx context.Context, q string, limit int) ([]
 				step_count,
 				CAST(last_modified_time AS TEXT)
 			FROM (
-				SELECT conversation_id, title, preview, step_count, last_modified_time, workspace_uris, project_id FROM conversation_summaries
+				SELECT conversation_id, title, preview, step_count, last_modified_time, workspace_uris, project_id, parent_conversation_id FROM conversation_summaries
 				UNION
-				SELECT conversation_id, title, preview, step_count, last_modified_time, workspace_uris, project_id FROM desktop.conversation_summaries
+				SELECT conversation_id, title, preview, step_count, last_modified_time, workspace_uris, project_id, parent_conversation_id FROM desktop.conversation_summaries
 			)
-			WHERE title LIKE ? OR preview LIKE ? OR workspace_uris LIKE ?
+			WHERE (parent_conversation_id = '' OR parent_conversation_id IS NULL)
+			  AND (title LIKE ? OR preview LIKE ? OR workspace_uris LIKE ?)
 			ORDER BY last_modified_time DESC
 			LIMIT ?
 		`
@@ -346,7 +351,8 @@ func (s *ConversationStore) Search(ctx context.Context, q string, limit int) ([]
 				step_count,
 				CAST(last_modified_time AS TEXT)
 			FROM conversation_summaries
-			WHERE title LIKE ? OR preview LIKE ? OR workspace_uris LIKE ?
+			WHERE (parent_conversation_id = '' OR parent_conversation_id IS NULL)
+			  AND (title LIKE ? OR preview LIKE ? OR workspace_uris LIKE ?)
 			ORDER BY last_modified_time DESC
 			LIMIT ?
 		`

@@ -79,11 +79,13 @@ func (s *Server) handleListConversations(w http.ResponseWriter, r *http.Request)
 	limit, _ := strconv.Atoi(q.Get("limit"))
 	offset, _ := strconv.Atoi(q.Get("offset"))
 
+	includeChildren := q.Get("include_children") == "true"
 	opts := store.ListOptions{
-		Limit:     limit,
-		Offset:    offset,
-		Workspace: q.Get("workspace"),
-		Status:    q.Get("status"),
+		Limit:           limit,
+		Offset:          offset,
+		Workspace:       q.Get("workspace"),
+		Status:          q.Get("status"),
+		IncludeChildren: includeChildren,
 	}
 
 	items, err := s.store.List(r.Context(), opts)
