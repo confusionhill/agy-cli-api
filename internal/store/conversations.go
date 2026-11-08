@@ -79,9 +79,10 @@ type ListOptions struct {
 
 // ConversationStore reads conversation metadata and transcripts from the Antigravity data directory.
 type ConversationStore struct {
-	dataDir     string
-	desktopDir  string
-	hasAttached bool
+	dataDir          string
+	desktopDir       string
+	defaultWorkspace string
+	hasAttached      bool
 }
 
 // NewConversationStore creates a new ConversationStore rooted at dataDir (e.g. ~/.gemini/antigravity-cli).
@@ -97,6 +98,11 @@ func NewConversationStore(dataDir string, extraDesktopDir ...string) *Conversati
 		dataDir:    dataDir,
 		desktopDir: desktopDir,
 	}
+}
+
+// SetDefaultWorkspace configures a fallback workspace path for conversations without workspace URIs.
+func (s *ConversationStore) SetDefaultWorkspace(workspace string) {
+	s.defaultWorkspace = strings.TrimSpace(workspace)
 }
 
 func (s *ConversationStore) openDB() (*sql.DB, bool, error) {
@@ -238,6 +244,9 @@ func (s *ConversationStore) List(ctx context.Context, opts ListOptions) ([]Conve
 			return nil, fmt.Errorf("scan conversation_summaries: %w", err)
 		}
 		item.WorkspaceURIs = parseWorkspaceURIs(wsRaw)
+		if len(item.WorkspaceURIs) == 0 && s.defaultWorkspace != "" {
+			item.WorkspaceURIs = []string{"file://" + filepath.ToSlash(s.defaultWorkspace)}
+		}
 		summaries = append(summaries, item)
 	}
 
@@ -443,6 +452,9 @@ func (s *ConversationStore) Get(ctx context.Context, conversationID string) (*Co
 			&item.LastUserInputTime,
 		); scanErr == nil {
 			item.WorkspaceURIs = parseWorkspaceURIs(wsRaw)
+			if len(item.WorkspaceURIs) == 0 && s.defaultWorkspace != "" {
+				item.WorkspaceURIs = []string{"file://" + filepath.ToSlash(s.defaultWorkspace)}
+			}
 			summary = &item
 		}
 	}

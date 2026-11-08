@@ -29,6 +29,7 @@ func main() {
 
 	runner := agy.NewRunner(cfg.AgyBin, cfg.DefaultWorkspace, cfg.DefaultPermissionMode)
 	convStore := store.NewConversationStore(cfg.DataDir)
+	convStore.SetDefaultWorkspace(cfg.DefaultWorkspace)
 	srv := server.New(cfg, runner, convStore, logger)
 
 	httpServer := &http.Server{

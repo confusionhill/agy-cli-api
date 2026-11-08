@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"math"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
@@ -48,10 +49,18 @@ func (r *Runner) BuildArgs(req ChatRequest, stream bool) []string {
 		args = append(args, "--conversation", req.ConversationID)
 	}
 
+	effectiveWorkspace := r.ResolveWorkspace(req.WorkspaceDir)
+	hasTargetWorkspace := false
 	for _, dir := range req.AddDirs {
 		if trimmed := strings.TrimSpace(dir); trimmed != "" {
 			args = append(args, "--add-dir", trimmed)
+			if filepath.Clean(trimmed) == filepath.Clean(effectiveWorkspace) {
+				hasTargetWorkspace = true
+			}
 		}
+	}
+	if !hasTargetWorkspace && effectiveWorkspace != "" {
+		args = append(args, "--add-dir", effectiveWorkspace)
 	}
 
 	if req.Model != "" {

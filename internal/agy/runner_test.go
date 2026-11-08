@@ -29,6 +29,7 @@ func TestBuildArgs(t *testing.T) {
 		"--conversation", "conv-123",
 		"--add-dir", "/extra/dir1",
 		"--add-dir", "/extra/dir2",
+		"--add-dir", "/workspace",
 		"--model", "gemini-4-argon-medium",
 		"--effort", "high",
 		"--agent", "research",
@@ -46,6 +47,7 @@ func TestBuildArgs(t *testing.T) {
 	wantDefault := []string{
 		"-p", "ping",
 		"--output-format", "json",
+		"--add-dir", "/workspace",
 		"--dangerously-skip-permissions",
 	}
 	if !reflect.DeepEqual(gotDefault, wantDefault) {
