@@ -142,3 +142,26 @@ curl "http://localhost:8080/api/v1/media?uri=file:///Users/dika/.gemini/antigrav
 ```bash
 curl -X POST "http://localhost:8080/api/v1/conversations/<conversation_id>/cancel"
 ```
+
+---
+
+## Telegram Bot Integration
+
+`agy-cli-api` includes an embedded Telegram Bot that runs concurrently with the HTTP API:
+
+1. Create a bot with [@BotFather](https://t.me/BotFather) and get your `TELEGRAM_BOT_TOKEN`.
+2. Get your numeric User ID from [@userinfobot](https://t.me/userinfobot).
+3. Set the following in `.env`:
+   ```env
+   TELEGRAM_ENABLED=true
+   TELEGRAM_BOT_TOKEN=123456789:ABCdefGhIJK...
+   TELEGRAM_ALLOWED_USER_IDS=your_numeric_user_id
+   ```
+4. Start `./bin/agy-cli-api` and message your bot! Use `/help`, `/new`, `/folders`, `/convs`, `/models`, `/effort`, `/usage`, or send photos directly with captions.
+
+---
+
+## License
+
+This project is licensed under the [MIT License](LICENSE).
+
