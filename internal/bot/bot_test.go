@@ -72,3 +72,4 @@ func TestRenderProgressBar(t *testing.T) {
 		t.Errorf("expected 10 empty blocks, got %s", empty)
 	}
 }
+

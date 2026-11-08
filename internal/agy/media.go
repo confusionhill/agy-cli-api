@@ -80,3 +80,4 @@ func ExtractMediaFromText(text string) []MediaItem {
 
 	return items
 }
+

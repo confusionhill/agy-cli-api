@@ -34,3 +34,4 @@ func TestExtractMediaFromText(t *testing.T) {
 		t.Errorf("expected SizeBytes %d, got %d", len("fake-image-bytes"), items[0].SizeBytes)
 	}
 }
+

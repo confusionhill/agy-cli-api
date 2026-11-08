@@ -125,3 +125,4 @@ func (b *Bot) isUserAllowed(userID int64) bool {
 	}
 	return false
 }
+

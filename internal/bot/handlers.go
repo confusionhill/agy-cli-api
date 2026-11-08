@@ -168,8 +168,14 @@ func (b *Bot) cmdNew(chatID int64, sess *UserSession, args string) {
 	sess.mu.Lock()
 	sess.ActiveConversationID = ""
 	if args != "" {
-		sess.ActiveWorkspaceDir = args
-		sess.ActiveWorkspaceLabel = getFolderLabel(args)
+		folderMap := b.getKnownFolders()
+		if fullPath, ok := folderMap[args]; ok {
+			sess.ActiveWorkspaceDir = fullPath
+			sess.ActiveWorkspaceLabel = args
+		} else {
+			sess.ActiveWorkspaceDir = args
+			sess.ActiveWorkspaceLabel = getFolderLabel(args)
+		}
 	}
 	folderLabel := sess.ActiveWorkspaceLabel
 	sess.mu.Unlock()
@@ -179,34 +185,34 @@ func (b *Bot) cmdNew(chatID int64, sess *UserSession, args string) {
 	_, _ = b.api.Send(reply)
 }
 
-func (b *Bot) cmdFolders(chatID int64) {
-	convs, err := b.store.List(context.Background(), store.ListOptions{Limit: 150})
-	if err != nil {
-		reply := tgbotapi.NewMessage(chatID, "Failed to load project folders: "+err.Error())
-		_, _ = b.api.Send(reply)
-		return
-	}
-
+func (b *Bot) getKnownFolders() map[string]string {
 	folderMap := make(map[string]string)
-	for _, c := range convs {
-		if len(c.WorkspaceURIs) > 0 {
-			raw := c.WorkspaceURIs[0]
-			clean := strings.TrimPrefix(raw, "file://")
-			clean = strings.TrimRight(clean, "/")
-			label := getFolderLabel(clean)
-			if label != "" && clean != "" {
-				folderMap[label] = clean
+	convs, err := b.store.List(context.Background(), store.ListOptions{Limit: 150})
+	if err == nil {
+		for _, c := range convs {
+			if len(c.WorkspaceURIs) > 0 {
+				raw := c.WorkspaceURIs[0]
+				clean := strings.TrimPrefix(raw, "file://")
+				clean = strings.TrimRight(clean, "/")
+				label := getFolderLabel(clean)
+				if label != "" && clean != "" {
+					folderMap[label] = clean
+				}
 			}
 		}
 	}
 
-	// Always ensure default workspace is present
 	defaultLabel := getFolderLabel(b.cfg.DefaultWorkspace)
 	folderMap[defaultLabel] = b.cfg.DefaultWorkspace
+	return folderMap
+}
+
+func (b *Bot) cmdFolders(chatID int64) {
+	folderMap := b.getKnownFolders()
 
 	var rows [][]tgbotapi.InlineKeyboardButton
-	for label, path := range folderMap {
-		btn := tgbotapi.NewInlineKeyboardButtonData("📁 "+label, "fld:"+path)
+	for label := range folderMap {
+		btn := tgbotapi.NewInlineKeyboardButtonData("📁 "+label, "fld:"+label)
 		rows = append(rows, []tgbotapi.InlineKeyboardButton{btn})
 	}
 
@@ -222,14 +228,23 @@ func (b *Bot) cmdSetFolder(chatID int64, sess *UserSession, target string) {
 		return
 	}
 
+	folderMap := b.getKnownFolders()
+	resolvedPath := target
+	resolvedLabel := getFolderLabel(target)
+
+	// Check if target was a folder label
+	if fullPath, ok := folderMap[target]; ok {
+		resolvedPath = fullPath
+		resolvedLabel = target
+	}
+
 	sess.mu.Lock()
-	sess.ActiveWorkspaceDir = target
-	sess.ActiveWorkspaceLabel = getFolderLabel(target)
+	sess.ActiveWorkspaceDir = resolvedPath
+	sess.ActiveWorkspaceLabel = resolvedLabel
 	sess.ActiveConversationID = "" // reset conversation for new folder
-	label := sess.ActiveWorkspaceLabel
 	sess.mu.Unlock()
 
-	reply := tgbotapi.NewMessage(chatID, fmt.Sprintf("📁 Switched folder to *%s*. Next message starts a new chat there.", label))
+	reply := tgbotapi.NewMessage(chatID, fmt.Sprintf("📁 Switched folder to *%s*. Next message starts a new chat there.", resolvedLabel))
 	reply.ParseMode = "Markdown"
 	_, _ = b.api.Send(reply)
 }
@@ -249,6 +264,10 @@ func (b *Bot) cmdConvs(chatID int64) {
 	}
 
 	var rows [][]tgbotapi.InlineKeyboardButton
+	rows = append(rows, []tgbotapi.InlineKeyboardButton{
+		tgbotapi.NewInlineKeyboardButtonData("➕ Start New Conversation", "cnv:__new__"),
+	})
+
 	for _, c := range convs {
 		title := c.Title
 		if title == "" {
@@ -448,7 +467,11 @@ func (b *Bot) handleCallback(cb *tgbotapi.CallbackQuery) {
 		b.cmdSetFolder(chatID, sess, path)
 	} else if strings.HasPrefix(data, "cnv:") {
 		convID := strings.TrimPrefix(data, "cnv:")
-		b.cmdSwitchConv(chatID, sess, convID)
+		if convID == "__new__" {
+			b.cmdNew(chatID, sess, "")
+		} else {
+			b.cmdSwitchConv(chatID, sess, convID)
+		}
 	} else if strings.HasPrefix(data, "mdl:") {
 		modelID := strings.TrimPrefix(data, "mdl:")
 		b.cmdSetModel(chatID, sess, modelID)
